@@ -1,0 +1,23 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# sessions + configs (runtime data, not source)
+sessions/
+configs/
+
+# env (keeping it in case someone swaps to a cloud model later)
+.env
+
+# vscode
+.vscode/
+
+# os
+.DS_Store
+Thumbs.db

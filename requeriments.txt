@@ -1,0 +1,6 @@
+strands-agents
+streamlit
+matplotlib
+numpy
+scipy
+python-dotenv
