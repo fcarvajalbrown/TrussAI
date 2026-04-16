@@ -38,7 +38,7 @@ def test_build_truss_node_count():
 
 def test_build_truss_member_count():
     result = build_truss(NODES, MEMBERS, SUPPORTS)
-    assert result["n_members"] == 2
+    assert result["n_members"] == 3
 
 def test_build_truss_dof_count():
     result = build_truss(NODES, MEMBERS, SUPPORTS)
@@ -56,7 +56,7 @@ def test_build_truss_K_symmetric():
 
 def test_build_truss_returns_members():
     result = build_truss(NODES, MEMBERS, SUPPORTS)
-    assert len(result["members"]) == 2
+    assert len(result["members"]) == 3
 
 def test_build_truss_returns_nodes():
     result = build_truss(NODES, MEMBERS, SUPPORTS)
@@ -96,8 +96,8 @@ def test_solve_truss_reaction_forces_balance():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     result = solve_truss(build, LOADS)
     vertical = [r["force_N"] for r in result["reactions"] if r["dof"] % 2 == 1]
-    # sum of vertical reactions must equal applied load magnitude
-    assert abs(sum(vertical) + 10000.0) < 1e-2
+    # vertical reactions must sum to +10000 to balance the -10000 load
+    assert abs(sum(vertical) - 10000.0) < 1e-2
 
 def test_solve_truss_returns_u():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
@@ -109,7 +109,7 @@ def test_solve_truss_passes_members_forward():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     result = solve_truss(build, LOADS)
     assert "members" in result
-    assert len(result["members"]) == 2
+    assert len(result["members"]) == 3
 
 
 # ── analyze_results ───────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ def test_analyze_member_count():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     solve = solve_truss(build, LOADS)
     result = analyze_results(solve)
-    assert len(result["members"]) == 2
+    assert len(result["members"]) == 3
 
 def test_analyze_safe_flag_is_bool():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
