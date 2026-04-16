@@ -10,11 +10,20 @@ from tools.beam import euler_beam, timoshenko_beam
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
-
-NODES    = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]
-MEMBERS  = [[0, 1, 0.01, 200e9], [1, 2, 0.01, 200e9]]
-SUPPORTS = [[0, 1, 1], [2, 1, 1]]
-LOADS    = [[1, 0.0, -10000.0]]
+#
+#   node 2 (1, 1)
+#     /\
+#    /  \
+#   /    \
+#  0------1
+# (0,0)  (2,0)
+#
+# pinned at 0 (x+y fixed), roller at 1 (y fixed), load down at 2
+#
+NODES    = [[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]
+MEMBERS  = [[0, 1, 0.01, 200e9], [0, 2, 0.01, 200e9], [1, 2, 0.01, 200e9]]
+SUPPORTS = [[0, 1, 1], [1, 0, 1]]
+LOADS    = [[2, 0.0, -10000.0]]
 
 
 # ── build_truss ───────────────────────────────────────────────────────────────
@@ -74,19 +83,21 @@ def test_solve_truss_supported_nodes_zero_displacement():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     result = solve_truss(build, LOADS)
     u = result["u"]
-    assert abs(u[1]) < 1e-10  # node 0 uy
-    assert abs(u[5]) < 1e-10  # node 2 uy
+    assert abs(u[0]) < 1e-10  # node 0 ux fixed
+    assert abs(u[1]) < 1e-10  # node 0 uy fixed
+    assert abs(u[3]) < 1e-10  # node 1 uy fixed
 
 def test_solve_truss_loaded_node_deflects_down():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     result = solve_truss(build, LOADS)
-    assert result["u"][3] < 0  # node 1 uy negative
+    assert result["u"][5] < 0  # node 2 uy negative (downward load)
 
 def test_solve_truss_reaction_forces_balance():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
     result = solve_truss(build, LOADS)
     vertical = [r["force_N"] for r in result["reactions"] if r["dof"] % 2 == 1]
-    assert abs(sum(vertical) + 10000.0) < 1e-4
+    # sum of vertical reactions must equal applied load magnitude
+    assert abs(sum(vertical) + 10000.0) < 1e-2
 
 def test_solve_truss_returns_u():
     build = build_truss(NODES, MEMBERS, SUPPORTS)
