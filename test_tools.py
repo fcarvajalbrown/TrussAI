@@ -6,9 +6,13 @@ Run integration only with: pytest test_tools.py -v -m integration
 """
 import pytest
 import numpy as np
+import tools.state as _state
 from tools.truss import _build_truss as build_truss, _solve_truss as solve_truss, _analyze_results as analyze_results
 from tools.beam import _euler_beam as euler_beam, _timoshenko_beam as timoshenko_beam
-from tools.state import truss_state, beam_state
+
+# convenience aliases so test assertions read cleanly
+truss_state = _state.truss_state
+beam_state  = _state.beam_state
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

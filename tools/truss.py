@@ -1,14 +1,15 @@
 from strands import tool
 import numpy as np
-from tools.state import truss_state
 
 
-def _build_truss(nodes: list, members: list, supports: list) -> dict:
+@tool
+def build_truss(nodes: list, members: list, supports: list) -> dict:
     """
     Assemble the global stiffness matrix for a 2D truss.
     nodes: [[x, y], ...] coordinates in meters
     members: [[node_i, node_j, area, E], ...] area in m2, E in Pa
     supports: [[node_id, dof_x, dof_y], ...] 1=fixed, 0=free
+    Returns stiffness matrix data and member geometry for use in solve_truss.
     """
     n_nodes = len(nodes)
     n_dof = 2 * n_nodes
@@ -21,14 +22,14 @@ def _build_truss(nodes: list, members: list, supports: list) -> dict:
         xj, yj = nodes[j]
 
         L = np.sqrt((xj - xi)**2 + (yj - yi)**2)
-        c = (xj - xi) / L
-        s = (yj - yi) / L
+        cos = (xj - xi) / L
+        sin = (yj - yi) / L
 
         k = (A * E / L) * np.array([
-            [ c*c,  c*s, -c*c, -c*s],
-            [ c*s,  s*s, -c*s, -s*s],
-            [-c*c, -c*s,  c*c,  c*s],
-            [-c*s, -s*s,  c*s,  s*s],
+            [ cos*cos,  cos*sin, -cos*cos, -cos*sin],
+            [ cos*sin,  sin*sin, -cos*sin, -sin*sin],
+            [-cos*cos, -cos*sin,  cos*cos,  cos*sin],
+            [-cos*sin, -sin*sin,  cos*sin,  sin*sin],
         ])
 
         dofs = [2*i, 2*i+1, 2*j, 2*j+1]
@@ -40,53 +41,54 @@ def _build_truss(nodes: list, members: list, supports: list) -> dict:
             "i": i, "j": j,
             "L": round(L, 4),
             "A": A, "E": E,
-            "c": round(c, 4),
-            "s": round(s, 4),
+            "c": round(cos, 4),
+            "s": round(sin, 4),
         })
-
-    truss_state.K = K
-    truss_state.nodes = nodes
-    truss_state.members = member_data
-    truss_state.supports = supports
-    truss_state.n_dof = n_dof
-    truss_state.ready = True
-    truss_state.solved = False
 
     return {
         "status": "ok",
         "n_nodes": n_nodes,
         "n_members": len(members),
         "n_dof": n_dof,
+        "nodes": nodes,
         "members": member_data,
-        "K_shape": list(K.shape),
+        "supports": supports,
+        "K": K.tolist(),
     }
 
 
-def _solve_truss(loads: list) -> dict:
+@tool
+def solve_truss(build_result: dict, loads: list) -> dict:
     """
     Solve Ku=F for the assembled truss.
+    build_result: full output dict from build_truss
     loads: [[node_id, fx, fy], ...] applied forces in Newtons
-    Returns nodal displacements and reaction forces.
+    Returns displacements, reactions, and member data for use in analyze_results.
     """
-    if not truss_state.ready:
-        return {"status": "error", "message": "No truss built — run build_truss first."}
+    if build_result.get("status") != "ok":
+        return {"status": "error", "message": "Invalid build_result — run build_truss first."}
 
-    F = np.zeros(truss_state.n_dof)
+    K = np.array(build_result["K"])
+    n_dof = build_result["n_dof"]
+    supports = build_result["supports"]
+    nodes = build_result["nodes"]
+
+    F = np.zeros(n_dof)
     for load in loads:
         node_id, fx, fy = int(load[0]), load[1], load[2]
         F[2 * node_id]     += fx
         F[2 * node_id + 1] += fy
 
     constrained = []
-    for support in truss_state.supports:
+    for support in supports:
         node_id, dof_x, dof_y = int(support[0]), support[1], support[2]
         if dof_x == 1:
             constrained.append(2 * node_id)
         if dof_y == 1:
             constrained.append(2 * node_id + 1)
 
-    free = [d for d in range(truss_state.n_dof) if d not in constrained]
-    K_free = truss_state.K[np.ix_(free, free)]
+    free = [d for d in range(n_dof) if d not in constrained]
+    K_free = K[np.ix_(free, free)]
     F_free = F[free]
 
     try:
@@ -94,20 +96,15 @@ def _solve_truss(loads: list) -> dict:
     except np.linalg.LinAlgError:
         return {"status": "error", "message": "Singular stiffness matrix — check supports and connectivity."}
 
-    u = np.zeros(truss_state.n_dof)
+    u = np.zeros(n_dof)
     for idx, dof in enumerate(free):
         u[dof] = u_free[idx]
 
-    reactions = truss_state.K @ u - F
-
-    truss_state.u = u
-    truss_state.F = F
-    truss_state.reactions = reactions
-    truss_state.solved = True
+    reactions = K @ u - F
 
     displacements = [
         {"node": i, "ux": round(u[2*i], 8), "uy": round(u[2*i+1], 8)}
-        for i in range(len(truss_state.nodes))
+        for i in range(len(nodes))
     ]
     reaction_list = [
         {"dof": d, "force_N": round(float(reactions[d]), 4)}
@@ -119,30 +116,33 @@ def _solve_truss(loads: list) -> dict:
         "displacements": displacements,
         "reactions": reaction_list,
         "max_displacement_m": round(float(np.max(np.abs(u))), 8),
+        "u": u.tolist(),
+        "members": build_result["members"],
     }
 
 
-def _analyze_results(yield_strength: float = 250e6) -> dict:
+@tool
+def analyze_results(solve_result: dict, yield_strength: float = 250e6) -> dict:
     """
     Compute member stresses and check against yield strength.
+    solve_result: full output dict from solve_truss
     yield_strength: material yield strength in Pa (default 250 MPa for structural steel)
     """
-    if not truss_state.solved:
-        return {"status": "error", "message": "No solution found — run solve_truss first."}
+    if solve_result.get("status") != "ok":
+        return {"status": "error", "message": "Invalid solve_result — run solve_truss first."}
 
+    u = np.array(solve_result["u"])
+    members = solve_result["members"]
     results = []
     warnings = []
     failures = []
 
-    for m in truss_state.members:
+    for m in members:
         i, j = m["i"], m["j"]
         L, A, E = m["L"], m["A"], m["E"]
         c, s = m["c"], m["s"]
 
-        ui = [truss_state.u[2*i], truss_state.u[2*i+1]]
-        uj = [truss_state.u[2*j], truss_state.u[2*j+1]]
-        delta = c * (uj[0] - ui[0]) + s * (uj[1] - ui[1])
-
+        delta = c * (u[2*j] - u[2*i]) + s * (u[2*j+1] - u[2*i+1])
         strain = delta / L
         stress = E * strain
         utilization = abs(stress) / yield_strength * 100
@@ -163,8 +163,6 @@ def _analyze_results(yield_strength: float = 250e6) -> dict:
             "status": status,
         })
 
-    truss_state.last_analysis = results
-
     return {
         "status": "ok",
         "members": results,
@@ -173,9 +171,3 @@ def _analyze_results(yield_strength: float = 250e6) -> dict:
         "safe": len(failures) == 0,
         "yield_strength_MPa": yield_strength / 1e6,
     }
-
-
-# decorated tools for the agent
-build_truss     = tool(_build_truss)
-solve_truss     = tool(_solve_truss)
-analyze_results = tool(_analyze_results)
