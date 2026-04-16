@@ -1,7 +1,6 @@
 from strands import Agent
 from strands.session.file_session_manager import FileSessionManager
 from core.model import model
-from core.mcp import get_mcp_client
 from tools.truss import build_truss, solve_truss, analyze_results
 from tools.beam import euler_beam, timoshenko_beam
 

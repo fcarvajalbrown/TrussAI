@@ -1,46 +1,16 @@
 """
 TrussAI tool test suite.
-Run with: python -m pytest test_tools.py -v
-Ollama integration test requires: ollama serve + qwen2.5:3b pulled
-Run integration only with: pytest test_tools.py -v -m integration
+Run with: pytest test_tools.py -v
+Ollama integration test: pytest test_tools.py -v -m integration
 """
 import pytest
 import numpy as np
-import tools.state as _state
-from tools.truss import _build_truss as build_truss, _solve_truss as solve_truss, _analyze_results as analyze_results
-from tools.beam import _euler_beam as euler_beam, _timoshenko_beam as timoshenko_beam
-
-# convenience aliases so test assertions read cleanly
-truss_state = _state.truss_state
-beam_state  = _state.beam_state
+from tools.truss import build_truss, solve_truss, analyze_results
+from tools.beam import euler_beam, timoshenko_beam
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
-@pytest.fixture(autouse=True)
-def reset_state():
-    """Reset shared state before every test."""
-    import numpy as np
-    truss_state.K = np.empty((0, 0))
-    truss_state.nodes = []
-    truss_state.members = []
-    truss_state.supports = []
-    truss_state.n_dof = 0
-    truss_state.u = np.empty(0)
-    truss_state.F = np.empty(0)
-    truss_state.reactions = np.empty(0)
-    truss_state.last_analysis = []
-    truss_state.ready = False
-    truss_state.solved = False
-    beam_state.last_result = {}
-    yield
-
-
-# ── simple 3-node truss ───────────────────────────────────────────────────────
-#
-#   node 0 (0,0) --- node 1 (1,0) --- node 2 (2,0)
-#   pinned at 0 and 2, downward load at node 1
-#
 NODES    = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]
 MEMBERS  = [[0, 1, 0.01, 200e9], [1, 2, 0.01, 200e9]]
 SUPPORTS = [[0, 1, 1], [2, 1, 1]]
@@ -67,87 +37,101 @@ def test_build_truss_dof_count():
 
 def test_build_truss_K_shape():
     result = build_truss(NODES, MEMBERS, SUPPORTS)
-    assert result["K_shape"] == [6, 6]
-
-def test_build_truss_state_populated():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    assert truss_state.K is not None
-    assert truss_state.nodes is not None
-    assert truss_state.members is not None
+    K = np.array(result["K"])
+    assert K.shape == (6, 6)
 
 def test_build_truss_K_symmetric():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    assert np.allclose(truss_state.K, truss_state.K.T)
+    result = build_truss(NODES, MEMBERS, SUPPORTS)
+    K = np.array(result["K"])
+    assert np.allclose(K, K.T)
+
+def test_build_truss_returns_members():
+    result = build_truss(NODES, MEMBERS, SUPPORTS)
+    assert len(result["members"]) == 2
+
+def test_build_truss_returns_nodes():
+    result = build_truss(NODES, MEMBERS, SUPPORTS)
+    assert result["nodes"] == NODES
 
 
 # ── solve_truss ───────────────────────────────────────────────────────────────
 
-def test_solve_truss_without_build_returns_error():
-    result = solve_truss(LOADS)
+def test_solve_truss_invalid_build_returns_error():
+    result = solve_truss({"status": "error"}, LOADS)
     assert result["status"] == "error"
 
 def test_solve_truss_returns_ok():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    result = solve_truss(LOADS)
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
     assert result["status"] == "ok"
 
 def test_solve_truss_displacement_count():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    result = solve_truss(LOADS)
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
     assert len(result["displacements"]) == 3
 
 def test_solve_truss_supported_nodes_zero_displacement():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    assert abs(truss_state.u[1]) < 1e-10  # node 0 uy
-    assert abs(truss_state.u[5]) < 1e-10  # node 2 uy
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
+    u = result["u"]
+    assert abs(u[1]) < 1e-10  # node 0 uy
+    assert abs(u[5]) < 1e-10  # node 2 uy
 
 def test_solve_truss_loaded_node_deflects_down():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    assert truss_state.u[3] < 0  # node 1 uy negative
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
+    assert result["u"][3] < 0  # node 1 uy negative
 
 def test_solve_truss_reaction_forces_balance():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    result = solve_truss(LOADS)
-    vertical_reactions = [r["force_N"] for r in result["reactions"] if r["dof"] % 2 == 1]
-    assert abs(sum(vertical_reactions) + 10000.0) < 1e-4
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
+    vertical = [r["force_N"] for r in result["reactions"] if r["dof"] % 2 == 1]
+    assert abs(sum(vertical) + 10000.0) < 1e-4
 
-def test_solve_truss_state_populated():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    assert truss_state.solved is True
+def test_solve_truss_returns_u():
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
+    assert "u" in result
+    assert len(result["u"]) == 6
+
+def test_solve_truss_passes_members_forward():
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    result = solve_truss(build, LOADS)
+    assert "members" in result
+    assert len(result["members"]) == 2
 
 
 # ── analyze_results ───────────────────────────────────────────────────────────
 
-def test_analyze_without_solve_returns_error():
-    result = analyze_results()
+def test_analyze_invalid_solve_returns_error():
+    result = analyze_results({"status": "error"})
     assert result["status"] == "error"
 
 def test_analyze_returns_ok():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    result = analyze_results()
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    solve = solve_truss(build, LOADS)
+    result = analyze_results(solve)
     assert result["status"] == "ok"
 
 def test_analyze_member_count():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    result = analyze_results()
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    solve = solve_truss(build, LOADS)
+    result = analyze_results(solve)
     assert len(result["members"]) == 2
 
-def test_analyze_safe_flag():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    result = analyze_results(yield_strength=250e6)
+def test_analyze_safe_flag_is_bool():
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    solve = solve_truss(build, LOADS)
+    result = analyze_results(solve, yield_strength=250e6)
     assert isinstance(result["safe"], bool)
 
-def test_analyze_state_populated():
-    build_truss(NODES, MEMBERS, SUPPORTS)
-    solve_truss(LOADS)
-    analyze_results()
-    assert len(truss_state.last_analysis) > 0
+def test_analyze_stress_values_present():
+    build = build_truss(NODES, MEMBERS, SUPPORTS)
+    solve = solve_truss(build, LOADS)
+    result = analyze_results(solve)
+    for m in result["members"]:
+        assert "stress_MPa" in m
+        assert "utilization_%" in m
 
 
 # ── euler_beam ────────────────────────────────────────────────────────────────
@@ -194,18 +178,9 @@ def test_euler_unknown_support_returns_error():
     result = euler_beam(
         length=5.0, E=200e9, I=1e-4,
         load_type="uniform", load_value=1000.0,
-        support_type="unknown_support"
+        support_type="unknown"
     )
     assert result["status"] == "error"
-
-def test_euler_state_populated():
-    euler_beam(
-        length=5.0, E=200e9, I=1e-4,
-        load_type="uniform", load_value=1000.0,
-        support_type="simply_supported"
-    )
-    assert beam_state.last_result is not None
-    assert beam_state.last_result["theory"] == "Euler-Bernoulli"
 
 
 # ── timoshenko_beam ───────────────────────────────────────────────────────────
@@ -220,13 +195,12 @@ def test_timoshenko_simply_supported_point_center():
     assert result["status"] == "ok"
 
 def test_timoshenko_deflection_greater_than_euler():
-    L, E, I = 1.0, 200e9, 1e-4
-    G, A, kappa, P = 80e9, 0.01, 0.833, 10000.0
+    L, E, I, P = 1.0, 200e9, 1e-4, 10000.0
     euler = euler_beam(length=L, E=E, I=I, load_type="point_center",
                        load_value=P, support_type="simply_supported")
-    timo  = timoshenko_beam(length=L, E=E, I=I, G=G, A=A, kappa=kappa,
-                            load_type="point_center", load_value=P,
-                            support_type="simply_supported")
+    timo = timoshenko_beam(length=L, E=E, I=I, G=80e9, A=0.01, kappa=0.833,
+                           load_type="point_center", load_value=P,
+                           support_type="simply_supported")
     assert timo["delta_max_m"] > euler["delta_max_m"]
 
 def test_timoshenko_shear_contribution_positive():
@@ -238,7 +212,7 @@ def test_timoshenko_shear_contribution_positive():
     )
     assert result["shear_contribution_%"] > 0
 
-def test_timoshenko_phi_parameter_present():
+def test_timoshenko_phi_present():
     result = timoshenko_beam(
         length=2.0, E=200e9, I=1e-4,
         G=80e9, A=0.01, kappa=0.833,
@@ -255,16 +229,6 @@ def test_timoshenko_unknown_support_returns_error():
         support_type="fixed_fixed"
     )
     assert result["status"] == "error"
-
-def test_timoshenko_state_populated():
-    timoshenko_beam(
-        length=2.0, E=200e9, I=1e-4,
-        G=80e9, A=0.01, kappa=0.833,
-        load_type="point_end", load_value=1000.0,
-        support_type="cantilever"
-    )
-    assert beam_state.last_result is not None
-    assert beam_state.last_result["theory"] == "Timoshenko"
 
 
 # ── ollama integration ────────────────────────────────────────────────────────
