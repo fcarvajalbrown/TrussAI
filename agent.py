@@ -24,6 +24,7 @@ def get_agent(mcp_client, agent_id: str = "trussai") -> Agent:
         ] + mcp_client.list_tools_sync(),
         session_manager=session_manager,
         agent_id=agent_id,
+        max_parallel_tools=1,
     )
 
 def chat(agent, user_input: str) -> str:
