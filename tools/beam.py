@@ -3,8 +3,7 @@ import numpy as np
 from tools.state import beam_state
 
 
-@tool
-def euler_beam(
+def _euler_beam(
     length: float,
     E: float,
     I: float,
@@ -95,8 +94,7 @@ def euler_beam(
     }
 
 
-@tool
-def timoshenko_beam(
+def _timoshenko_beam(
     length: float,
     E: float,
     I: float,
@@ -198,3 +196,8 @@ def timoshenko_beam(
         "slenderness_note": slenderness_note,
         "note": "phi > 0.1 means shear deformation is significant",
     }
+
+
+# decorated tools for the agent
+euler_beam      = tool(_euler_beam)
+timoshenko_beam = tool(_timoshenko_beam)

@@ -3,8 +3,7 @@ import numpy as np
 from tools.state import truss_state
 
 
-@tool
-def build_truss(nodes: list, members: list, supports: list) -> dict:
+def _build_truss(nodes: list, members: list, supports: list) -> dict:
     """
     Assemble the global stiffness matrix for a 2D truss.
     nodes: [[x, y], ...] coordinates in meters
@@ -50,6 +49,8 @@ def build_truss(nodes: list, members: list, supports: list) -> dict:
     truss_state.members = member_data
     truss_state.supports = supports
     truss_state.n_dof = n_dof
+    truss_state.ready = True
+    truss_state.solved = False
 
     return {
         "status": "ok",
@@ -61,14 +62,13 @@ def build_truss(nodes: list, members: list, supports: list) -> dict:
     }
 
 
-@tool
-def solve_truss(loads: list) -> dict:
+def _solve_truss(loads: list) -> dict:
     """
     Solve Ku=F for the assembled truss.
     loads: [[node_id, fx, fy], ...] applied forces in Newtons
     Returns nodal displacements and reaction forces.
     """
-    if truss_state.K is None:
+    if not truss_state.ready:
         return {"status": "error", "message": "No truss built — run build_truss first."}
 
     F = np.zeros(truss_state.n_dof)
@@ -103,6 +103,7 @@ def solve_truss(loads: list) -> dict:
     truss_state.u = u
     truss_state.F = F
     truss_state.reactions = reactions
+    truss_state.solved = True
 
     displacements = [
         {"node": i, "ux": round(u[2*i], 8), "uy": round(u[2*i+1], 8)}
@@ -121,13 +122,12 @@ def solve_truss(loads: list) -> dict:
     }
 
 
-@tool
-def analyze_results(yield_strength: float = 250e6) -> dict:
+def _analyze_results(yield_strength: float = 250e6) -> dict:
     """
     Compute member stresses and check against yield strength.
     yield_strength: material yield strength in Pa (default 250 MPa for structural steel)
     """
-    if truss_state.u is None:
+    if not truss_state.solved:
         return {"status": "error", "message": "No solution found — run solve_truss first."}
 
     results = []
@@ -173,3 +173,9 @@ def analyze_results(yield_strength: float = 250e6) -> dict:
         "safe": len(failures) == 0,
         "yield_strength_MPa": yield_strength / 1e6,
     }
+
+
+# decorated tools for the agent
+build_truss     = tool(_build_truss)
+solve_truss     = tool(_solve_truss)
+analyze_results = tool(_analyze_results)

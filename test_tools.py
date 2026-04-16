@@ -6,8 +6,8 @@ Run integration only with: pytest test_tools.py -v -m integration
 """
 import pytest
 import numpy as np
-from tools.truss import build_truss, solve_truss, analyze_results
-from tools.beam import euler_beam, timoshenko_beam
+from tools.truss import _build_truss as build_truss, _solve_truss as solve_truss, _analyze_results as analyze_results
+from tools.beam import _euler_beam as euler_beam, _timoshenko_beam as timoshenko_beam
 from tools.state import truss_state, beam_state
 
 
@@ -16,16 +16,19 @@ from tools.state import truss_state, beam_state
 @pytest.fixture(autouse=True)
 def reset_state():
     """Reset shared state before every test."""
-    truss_state.K = None
-    truss_state.nodes = None
-    truss_state.members = None
-    truss_state.supports = None
-    truss_state.n_dof = None
-    truss_state.u = None
-    truss_state.F = None
-    truss_state.reactions = None
-    truss_state.last_analysis = None
-    beam_state.last_result = None
+    import numpy as np
+    truss_state.K = np.empty((0, 0))
+    truss_state.nodes = []
+    truss_state.members = []
+    truss_state.supports = []
+    truss_state.n_dof = 0
+    truss_state.u = np.empty(0)
+    truss_state.F = np.empty(0)
+    truss_state.reactions = np.empty(0)
+    truss_state.last_analysis = []
+    truss_state.ready = False
+    truss_state.solved = False
+    beam_state.last_result = {}
     yield
 
 
@@ -109,8 +112,7 @@ def test_solve_truss_reaction_forces_balance():
 def test_solve_truss_state_populated():
     build_truss(NODES, MEMBERS, SUPPORTS)
     solve_truss(LOADS)
-    assert truss_state.u is not None
-    assert truss_state.reactions is not None
+    assert truss_state.solved is True
 
 
 # ── analyze_results ───────────────────────────────────────────────────────────
@@ -141,7 +143,7 @@ def test_analyze_state_populated():
     build_truss(NODES, MEMBERS, SUPPORTS)
     solve_truss(LOADS)
     analyze_results()
-    assert truss_state.last_analysis is not None
+    assert len(truss_state.last_analysis) > 0
 
 
 # ── euler_beam ────────────────────────────────────────────────────────────────
